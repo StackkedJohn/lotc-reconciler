@@ -14,7 +14,7 @@ interface Props {
   onSelectPair: (pair: DuplicatePair<NeonAccount | Child>, entityType: 'neon_account' | 'child') => void
 }
 
-export function Dashboard({ userName, onSelectPair }: Props) {
+export function Dashboard({ userName: _userName, onSelectPair }: Props) {
   const [tab, setTab] = useState<Tab>('contacts')
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(false)
