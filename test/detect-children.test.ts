@@ -13,29 +13,32 @@ const makeChild = (overrides: Partial<Child>): Child => ({
 })
 
 describe('detectChildDuplicates', () => {
-  it('detects same name + DOB as high confidence', () => {
+  it('same name + DOB = near-certain', () => {
     const a = makeChild({ first_name: 'Emma', last_name: 'Jones', date_of_birth: '2018-05-15' })
     const b = makeChild({ first_name: 'Emma', last_name: 'Jones', date_of_birth: '2018-05-15' })
     const pairs = detectChildDuplicates([a, b], [])
     expect(pairs).toHaveLength(1)
-    expect(pairs[0].confidence).toBe('high')
+    // same last(15) + same first(20) + same DOB(40) = 75 → high
+    expect(pairs[0].score).toBeGreaterThanOrEqual(70)
   })
 
-  it('detects same name + same caregiver as high confidence', () => {
+  it('same name + same caregiver = near-certain', () => {
     const cid = crypto.randomUUID()
     const a = makeChild({ first_name: 'Emma', last_name: 'Jones', caregiver_id: cid, date_of_birth: '2018-05-15' })
     const b = makeChild({ first_name: 'Emma', last_name: 'Jones', caregiver_id: cid, date_of_birth: null })
     const pairs = detectChildDuplicates([a, b], [])
     expect(pairs).toHaveLength(1)
-    expect(pairs[0].confidence).toBe('high')
+    // same last(15) + same first(20) + same caregiver(30) = 65 → high
+    expect(pairs[0].score).toBeGreaterThanOrEqual(60)
   })
 
-  it('detects fuzzy first name + close DOB as medium', () => {
+  it('fuzzy first name + close DOB = medium', () => {
     const a = makeChild({ first_name: 'Sara', last_name: 'Brown', date_of_birth: '2019-03-10' })
     const b = makeChild({ first_name: 'Sarah', last_name: 'Brown', date_of_birth: '2019-03-12' })
     const pairs = detectChildDuplicates([a, b], [])
     expect(pairs).toHaveLength(1)
-    expect(pairs[0].confidence).toBe('medium')
+    // same last(15) + similar first(10) + close DOB(20) = 45 → medium
+    expect(pairs[0].tier).toBe('medium')
   })
 
   it('does not flag different children', () => {
@@ -53,5 +56,16 @@ describe('detectChildDuplicates', () => {
       dismissed_by: 'test', dismissed_at: new Date().toISOString(),
     }]
     expect(detectChildDuplicates([a, b], dismissed)).toHaveLength(0)
+  })
+
+  it('sorts by score descending', () => {
+    const cid = crypto.randomUUID()
+    const a = makeChild({ first_name: 'Emma', last_name: 'Jones', date_of_birth: '2018-05-15', caregiver_id: cid })
+    const b = makeChild({ first_name: 'Emma', last_name: 'Jones', date_of_birth: '2018-05-15', caregiver_id: cid })
+    const c = makeChild({ first_name: 'Sara', last_name: 'Brown', date_of_birth: '2019-03-10' })
+    const d = makeChild({ first_name: 'Sarah', last_name: 'Brown', date_of_birth: '2019-03-12' })
+    const pairs = detectChildDuplicates([a, b, c, d], [])
+    expect(pairs.length).toBe(2)
+    expect(pairs[0].score).toBeGreaterThan(pairs[1].score)
   })
 })

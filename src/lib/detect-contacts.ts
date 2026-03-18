@@ -1,45 +1,47 @@
 import { normalizeToE164 } from './normalize-phone'
 import { levenshtein } from './levenshtein'
-import type { NeonAccount, DuplicatePair, DismissedDuplicate, Confidence } from './types'
+import type { NeonAccount, DuplicatePair, DismissedDuplicate } from './types'
+import { scoreTier } from './types'
 
-/** Skip phone groups larger than this — they're org numbers or placeholders, not real duplicates */
+/** Skip phone groups larger than this — org numbers or placeholders */
 const MAX_PHONE_GROUP = 10
 
-/** Records must have at least a first OR last name to be considered for matching */
+/** Skip last-name groups larger than this — too many common surnames */
+const MAX_LASTNAME_GROUP = 50
+
+/** Records must have at least a first OR last name */
 function hasName(acc: NeonAccount): boolean {
   return !!(acc.first_name?.trim() || acc.last_name?.trim())
 }
 
-/** For email matches: require the pair to look like the same person, not just shared email */
-function emailPairLooksLikeDuplicate(a: NeonAccount, b: NeonAccount): boolean {
-  const lastA = a.last_name?.trim().toLowerCase()
-  const lastB = b.last_name?.trim().toLowerCase()
-  const firstA = a.first_name?.trim().toLowerCase()
-  const firstB = b.first_name?.trim().toLowerCase()
+/**
+ * Scoring system — signals stack additively:
+ *
+ *   Same email .............. +45
+ *   Same phone .............. +45
+ *   Exact same last name .... +15
+ *   Exact same first name ... +20
+ *   Similar first name ...... +10  (Levenshtein ≤ 2)
+ *   Same zip code ........... +5
+ *
+ * Tiers:
+ *   90-100  "near-certain"  — same name + same email/phone (slam dunk)
+ *   50-89   "high"          — strong signal (email OR phone + partial name match)
+ *   30-49   "medium"        — moderate (fuzzy name only, or phone-only different names)
+ *   <30     dropped         — too weak to show
+ */
 
-  // Same last name → likely duplicate
-  if (lastA && lastB && lastA === lastB) return true
-
-  // Same first name → likely duplicate (e.g. two "Doug" records)
-  if (firstA && firstB && firstA === firstB) return true
-
-  // Fuzzy first name match with same last name
-  if (firstA && firstB && lastA && lastB && lastA === lastB) {
-    if (levenshtein(firstA, firstB) <= 2) return true
-  }
-
-  // One or both have no name — can't tell, so include it (user decides)
-  if (!hasName(a) || !hasName(b)) return true
-
-  // Different names entirely → probably a shared email (family/org), not a duplicate
-  return false
+interface PairAccumulator {
+  a: NeonAccount
+  b: NeonAccount
+  score: number
+  reasons: string[]
 }
 
 export function detectContactDuplicates(
   accounts: NeonAccount[],
   dismissed: DismissedDuplicate[]
 ): DuplicatePair<NeonAccount>[] {
-  // Filter out records with no name at all — they're not useful to merge
   const named = accounts.filter(hasName)
 
   const dismissedSet = new Set(
@@ -48,6 +50,7 @@ export function detectContactDuplicates(
   const pairKey = (a: string, b: string) => { const s = [a, b].sort(); return `${s[0]}|${s[1]}` }
   const isDismissed = (idA: string, idB: string) => dismissedSet.has(pairKey(idA, idB))
 
+  // Build indexes
   const byEmail = new Map<string, NeonAccount[]>()
   const byPhone = new Map<string, NeonAccount[]>()
   const byLastName = new Map<string, NeonAccount[]>()
@@ -69,74 +72,98 @@ export function detectContactDuplicates(
     }
   }
 
-  const pairs = new Map<string, { a: NeonAccount; b: NeonAccount; confidence: Confidence; reasons: string[] }>()
-  const addPair = (a: NeonAccount, b: NeonAccount, confidence: Confidence, reason: string) => {
+  // Accumulate pairs with additive scoring
+  const pairs = new Map<string, PairAccumulator>()
+
+  const addSignal = (a: NeonAccount, b: NeonAccount, points: number, reason: string) => {
     if (a.id === b.id || isDismissed(a.id, b.id)) return
     const key = pairKey(a.id, b.id)
     if (!pairs.has(key)) {
       const sorted = [a.id, b.id].sort()
-      pairs.set(key, { a: sorted[0] === a.id ? a : b, b: sorted[0] === a.id ? b : a, confidence, reasons: [reason] })
+      pairs.set(key, {
+        a: sorted[0] === a.id ? a : b,
+        b: sorted[0] === a.id ? b : a,
+        score: points,
+        reasons: [reason],
+      })
     } else {
       const existing = pairs.get(key)!
+      existing.score += points
       if (!existing.reasons.includes(reason)) existing.reasons.push(reason)
-      if (confidence === 'high') existing.confidence = 'high'
     }
   }
 
-  // Rule 1: Exact email — but only if the pair looks like the same person
+  // --- Collect all signals ---
+
+  // Email matches (+45)
   for (const group of byEmail.values()) {
     if (group.length < 2) continue
     for (let i = 0; i < group.length; i++)
       for (let j = i + 1; j < group.length; j++)
-        if (emailPairLooksLikeDuplicate(group[i], group[j]))
-          addPair(group[i], group[j], 'high', 'Same email')
+        addSignal(group[i], group[j], 45, 'Same email')
   }
 
-  // Rule 2: Exact phone — skip large groups (org numbers, placeholders)
+  // Phone matches (+45, skip large groups)
   for (const [, group] of byPhone) {
     if (group.length < 2 || group.length > MAX_PHONE_GROUP) continue
     for (let i = 0; i < group.length; i++)
       for (let j = i + 1; j < group.length; j++)
-        addPair(group[i], group[j], 'high', 'Same phone')
+        addSignal(group[i], group[j], 45, 'Same phone')
   }
 
-  // Rule 3: Fuzzy first name + exact last name (skip large groups — common surnames)
+  // Name signals — only within same last name groups
   for (const group of byLastName.values()) {
-    if (group.length < 2 || group.length > 50) continue
+    if (group.length < 2 || group.length > MAX_LASTNAME_GROUP) continue
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i], b = group[j]
-        if (!a.first_name || !b.first_name) continue
-        const dist = levenshtein(a.first_name.toLowerCase(), b.first_name.toLowerCase())
-        if (dist > 0 && dist <= 2) addPair(a, b, 'medium', 'Similar first name, same last name')
+
+        // Same last name (+15) — already guaranteed by the group
+        addSignal(a, b, 15, 'Same last name')
+
+        if (a.first_name && b.first_name) {
+          const firstA = a.first_name.toLowerCase()
+          const firstB = b.first_name.toLowerCase()
+
+          if (firstA === firstB) {
+            // Exact first name (+20)
+            addSignal(a, b, 20, 'Same first name')
+          } else {
+            const dist = levenshtein(firstA, firstB)
+            if (dist <= 2) {
+              // Similar first name (+10)
+              addSignal(a, b, 10, 'Similar first name')
+            }
+          }
+        }
+
+        // Same zip (+5)
+        if (a.zip_code && b.zip_code && a.zip_code === b.zip_code) {
+          addSignal(a, b, 5, 'Same zip code')
+        }
       }
     }
   }
 
-  // Rule 4: Exact same full name — only flag if they also share a zip or phone area code
-  // This catches "Katie Myers" appearing 216 times as a real person with multiple records
-  // but NOT "John Smith" in the same zip who are unrelated people
-  for (const group of byLastName.values()) {
-    if (group.length < 2 || group.length > 50) continue
-    for (let i = 0; i < group.length; i++) {
-      for (let j = i + 1; j < group.length; j++) {
-        const a = group[i], b = group[j]
-        if (!a.first_name || !b.first_name) continue
-        if (a.first_name.toLowerCase() !== b.first_name.toLowerCase()) continue
-        // Exact name match — require an additional signal: same zip AND same phone area code or same email domain
-        const sameZip = a.zip_code && b.zip_code && a.zip_code === b.zip_code
-        const sameEmailDomain = a.email && b.email &&
-          a.email.split('@')[1]?.toLowerCase() === b.email.split('@')[1]?.toLowerCase()
-        if (sameZip && sameEmailDomain)
-          addPair(a, b, 'medium', 'Same name, zip, and email domain')
-      }
-    }
-  }
+  // --- Filter and sort ---
+
+  // Drop pairs below threshold (score < 30) and name-only pairs that lack any contact signal
+  const MIN_SCORE = 30
 
   return Array.from(pairs.values())
-    .map(p => ({ recordA: p.a, recordB: p.b, confidence: p.confidence, reasons: p.reasons }))
-    .sort((a, b) => {
-      if (a.confidence !== b.confidence) return a.confidence === 'high' ? -1 : 1
-      return (a.recordA.last_name ?? '').localeCompare(b.recordA.last_name ?? '')
+    .filter(p => {
+      if (p.score < MIN_SCORE) return false
+      // Name-only matches (no email/phone) must have exact first+last to be worth showing
+      const hasContactSignal = p.reasons.some(r => r === 'Same email' || r === 'Same phone')
+      if (!hasContactSignal && p.score < 35) return false
+      return true
     })
+    .map(p => ({
+      recordA: p.a,
+      recordB: p.b,
+      score: Math.min(p.score, 100),
+      tier: scoreTier(Math.min(p.score, 100)),
+      reasons: p.reasons,
+    }))
+    .sort((a, b) => b.score - a.score) // highest score first
 }

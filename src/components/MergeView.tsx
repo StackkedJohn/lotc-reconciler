@@ -98,8 +98,12 @@ export function MergeView({ pair, entityType, userName, onComplete, onBack }: Pr
 
       <div className="bg-white border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
-          <span className={`text-xs font-medium px-2 py-0.5 rounded ${pair.confidence === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-            {pair.confidence}
+          <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+            pair.tier === 'near-certain' ? 'bg-red-100 text-red-800' :
+            pair.tier === 'high' ? 'bg-orange-100 text-orange-700' :
+            'bg-amber-100 text-amber-700'
+          }`}>
+            {pair.tier === 'near-certain' ? 'near certain' : pair.tier} ({pair.score})
           </span>
           <span className="text-sm text-gray-600">{pair.reasons.join(' · ')}</span>
         </div>

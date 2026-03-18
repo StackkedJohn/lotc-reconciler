@@ -1,5 +1,23 @@
 import { levenshtein } from './levenshtein'
-import type { Child, DuplicatePair, DismissedDuplicate, Confidence } from './types'
+import type { Child, DuplicatePair, DismissedDuplicate } from './types'
+import { scoreTier } from './types'
+
+/**
+ * Child scoring:
+ *   Same last name ........... +15
+ *   Exact same first name .... +20
+ *   Similar first name ....... +10
+ *   Same date of birth ....... +40
+ *   Close DOB (within 7 days)  +20
+ *   Same caregiver ........... +30
+ */
+
+interface PairAccumulator {
+  a: Child
+  b: Child
+  score: number
+  reasons: string[]
+}
 
 export function detectChildDuplicates(
   children: Child[],
@@ -20,17 +38,23 @@ export function detectChildDuplicates(
     }
   }
 
-  const pairs = new Map<string, { a: Child; b: Child; confidence: Confidence; reasons: string[] }>()
-  const addPair = (a: Child, b: Child, confidence: Confidence, reason: string) => {
+  const pairs = new Map<string, PairAccumulator>()
+
+  const addSignal = (a: Child, b: Child, points: number, reason: string) => {
     if (a.id === b.id || isDismissed(a.id, b.id)) return
     const key = pairKey(a.id, b.id)
     if (!pairs.has(key)) {
       const sorted = [a.id, b.id].sort()
-      pairs.set(key, { a: sorted[0] === a.id ? a : b, b: sorted[0] === a.id ? b : a, confidence, reasons: [reason] })
+      pairs.set(key, {
+        a: sorted[0] === a.id ? a : b,
+        b: sorted[0] === a.id ? b : a,
+        score: points,
+        reasons: [reason],
+      })
     } else {
       const existing = pairs.get(key)!
+      existing.score += points
       if (!existing.reasons.includes(reason)) existing.reasons.push(reason)
-      if (confidence === 'high') existing.confidence = 'high'
     }
   }
 
@@ -39,36 +63,55 @@ export function detectChildDuplicates(
   }
 
   for (const group of byLastName.values()) {
-    if (group.length < 2) continue
+    if (group.length < 2 || group.length > 50) continue
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i], b = group[j]
         if (!a.first_name || !b.first_name) continue
-        const firstA = a.first_name.toLowerCase(), firstB = b.first_name.toLowerCase()
-        const exactFirstName = firstA === firstB
 
-        // Rule 1: Same first name + last name + DOB
-        if (exactFirstName && a.date_of_birth && b.date_of_birth && a.date_of_birth === b.date_of_birth)
-          addPair(a, b, 'high', 'Same name and date of birth')
+        const firstA = a.first_name.toLowerCase()
+        const firstB = b.first_name.toLowerCase()
 
-        // Rule 2: Same first name + last name + same caregiver
-        if (exactFirstName && a.caregiver_id && b.caregiver_id && a.caregiver_id === b.caregiver_id)
-          addPair(a, b, 'high', 'Same name and caregiver')
+        // Same last name (+15)
+        addSignal(a, b, 15, 'Same last name')
 
-        // Rule 3: Fuzzy first name + close DOB
-        if (!exactFirstName && a.date_of_birth && b.date_of_birth) {
+        // Name matching
+        if (firstA === firstB) {
+          addSignal(a, b, 20, 'Same first name')
+        } else {
           const dist = levenshtein(firstA, firstB)
-          if (dist > 0 && dist <= 2 && daysDiff(a.date_of_birth, b.date_of_birth) <= 7)
-            addPair(a, b, 'medium', 'Similar name, close date of birth')
+          if (dist <= 2) {
+            addSignal(a, b, 10, 'Similar first name')
+          }
+        }
+
+        // DOB matching
+        if (a.date_of_birth && b.date_of_birth) {
+          if (a.date_of_birth === b.date_of_birth) {
+            addSignal(a, b, 40, 'Same date of birth')
+          } else if (daysDiff(a.date_of_birth, b.date_of_birth) <= 7) {
+            addSignal(a, b, 20, 'Close date of birth')
+          }
+        }
+
+        // Same caregiver (+30)
+        if (a.caregiver_id && b.caregiver_id && a.caregiver_id === b.caregiver_id) {
+          addSignal(a, b, 30, 'Same caregiver')
         }
       }
     }
   }
 
+  const MIN_SCORE = 30
+
   return Array.from(pairs.values())
-    .map(p => ({ recordA: p.a, recordB: p.b, confidence: p.confidence, reasons: p.reasons }))
-    .sort((a, b) => {
-      if (a.confidence !== b.confidence) return a.confidence === 'high' ? -1 : 1
-      return (a.recordA.last_name ?? '').localeCompare(b.recordA.last_name ?? '')
-    })
+    .filter(p => p.score >= MIN_SCORE)
+    .map(p => ({
+      recordA: p.a,
+      recordB: p.b,
+      score: Math.min(p.score, 100),
+      tier: scoreTier(Math.min(p.score, 100)),
+      reasons: p.reasons,
+    }))
+    .sort((a, b) => b.score - a.score)
 }

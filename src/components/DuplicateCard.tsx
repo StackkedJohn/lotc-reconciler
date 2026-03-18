@@ -1,14 +1,29 @@
-import type { Confidence } from '../lib/types'
+import type { ConfidenceTier } from '../lib/types'
+
+const tierStyles: Record<ConfidenceTier, string> = {
+  'near-certain': 'bg-red-100 text-red-800',
+  'high': 'bg-orange-100 text-orange-700',
+  'medium': 'bg-amber-100 text-amber-700',
+  'low': 'bg-gray-100 text-gray-600',
+}
+
+const tierLabels: Record<ConfidenceTier, string> = {
+  'near-certain': 'near certain',
+  'high': 'high',
+  'medium': 'medium',
+  'low': 'low',
+}
 
 interface Props {
   nameA: string
   nameB: string
   reasons: string[]
-  confidence: Confidence
+  tier: ConfidenceTier
+  score: number
   onClick: () => void
 }
 
-export function DuplicateCard({ nameA, nameB, reasons, confidence, onClick }: Props) {
+export function DuplicateCard({ nameA, nameB, reasons, tier, score, onClick }: Props) {
   return (
     <button onClick={onClick} className="w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-gray-400 transition-colors">
       <div className="flex items-start justify-between gap-3">
@@ -24,9 +39,12 @@ export function DuplicateCard({ nameA, nameB, reasons, confidence, onClick }: Pr
             ))}
           </div>
         </div>
-        <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded ${confidence === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-          {confidence}
-        </span>
+        <div className="shrink-0 flex items-center gap-1.5">
+          <span className="text-xs text-gray-400">{score}</span>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded ${tierStyles[tier]}`}>
+            {tierLabels[tier]}
+          </span>
+        </div>
       </div>
     </button>
   )

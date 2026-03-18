@@ -5,10 +5,10 @@ import { detectContactDuplicates } from '../lib/detect-contacts'
 import { detectChildDuplicates } from '../lib/detect-children'
 import { StatsBar } from './StatsBar'
 import { DuplicateCard } from './DuplicateCard'
-import type { NeonAccount, Child, DuplicatePair, DismissedDuplicate } from '../lib/types'
+import type { NeonAccount, Child, DuplicatePair, DismissedDuplicate, ConfidenceTier } from '../lib/types'
 
 type Tab = 'contacts' | 'children'
-type Filter = 'all' | 'high' | 'medium'
+type Filter = 'all' | ConfidenceTier
 
 interface Props {
   userName: string
@@ -29,24 +29,17 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
       const { data: dismissed } = await supabase.from('dismissed_duplicates').select('*')
       const dismissedList = (dismissed ?? []) as unknown as DismissedDuplicate[]
 
-      // Fetch ALL records (Supabase defaults to 1000 — we have 13k+ contacts)
       const accounts = await fetchAll<NeonAccount>(
         'neon_accounts',
         'id, neon_id, account_type, first_name, last_name, email, phone, company_name, address_line1, city, state, zip_code, individual_types, source, created_at'
       )
-      setContactPairs(detectContactDuplicates(
-        accounts,
-        showDismissed ? [] : dismissedList
-      ))
+      setContactPairs(detectContactDuplicates(accounts, showDismissed ? [] : dismissedList))
 
       const children = await fetchAll<Child>(
         'children',
         'id, first_name, last_name, nickname, date_of_birth, age, gender, ethnicity, placement_type, custody_county, grade_fall, caregiver_id, social_worker_id, source, created_at'
       )
-      setChildPairs(detectChildDuplicates(
-        children,
-        showDismissed ? [] : dismissedList
-      ))
+      setChildPairs(detectChildDuplicates(children, showDismissed ? [] : dismissedList))
     } finally {
       setLoading(false)
     }
@@ -55,15 +48,23 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
   useEffect(() => { scan() }, [scan])
 
   const pairs = tab === 'contacts' ? contactPairs : childPairs
-  const filtered = filter === 'all' ? pairs : pairs.filter(p => p.confidence === filter)
-  const highCount = pairs.filter(p => p.confidence === 'high').length
-  const mediumCount = pairs.filter(p => p.confidence === 'medium').length
+  const filtered = filter === 'all' ? pairs : pairs.filter(p => p.tier === filter)
+  const nearCertainCount = pairs.filter(p => p.tier === 'near-certain').length
+  const highCount = pairs.filter(p => p.tier === 'high').length
+  const mediumCount = pairs.filter(p => p.tier === 'medium').length
 
   const getName = (record: NeonAccount | Child): string => {
     const first = record.first_name || ''
     const last = record.last_name || ''
     return `${first} ${last}`.trim() || '(unnamed)'
   }
+
+  const filters: { value: Filter; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'near-certain', label: 'Near certain' },
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+  ]
 
   return (
     <div className="space-y-4">
@@ -90,13 +91,13 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
         </div>
       )}
 
-      <StatsBar total={pairs.length} high={highCount} medium={mediumCount} loading={loading} />
+      <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} loading={loading} />
 
       {pairs.length > 0 && (
         <div className="flex gap-1">
-          {(['all', 'high', 'medium'] as Filter[]).map(f => (
-            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1 rounded text-xs font-medium ${filter === f ? 'bg-gray-200 text-gray-900' : 'text-gray-500 hover:bg-gray-100'}`}>
-              {f === 'all' ? 'All' : f === 'high' ? 'High only' : 'Medium only'}
+          {filters.map(f => (
+            <button key={f.value} onClick={() => setFilter(f.value)} className={`px-3 py-1 rounded text-xs font-medium ${filter === f.value ? 'bg-gray-200 text-gray-900' : 'text-gray-500 hover:bg-gray-100'}`}>
+              {f.label}
             </button>
           ))}
         </div>
@@ -109,7 +110,8 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
             nameA={getName(pair.recordA)}
             nameB={getName(pair.recordB)}
             reasons={pair.reasons}
-            confidence={pair.confidence}
+            tier={pair.tier}
+            score={pair.score}
             onClick={() => onSelectPair(pair, tab === 'contacts' ? 'neon_account' : 'child')}
           />
         ))}

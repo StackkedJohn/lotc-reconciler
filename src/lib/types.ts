@@ -34,13 +34,22 @@ export interface Child {
   created_at: string
 }
 
-export type Confidence = 'high' | 'medium'
+export type ConfidenceTier = 'near-certain' | 'high' | 'medium' | 'low'
 
 export interface DuplicatePair<T> {
   recordA: T
   recordB: T
-  confidence: Confidence
+  score: number          // 0-100, higher = more likely duplicate
+  tier: ConfidenceTier   // derived from score
   reasons: string[]
+}
+
+/** Derive tier from numeric score */
+export function scoreTier(score: number): ConfidenceTier {
+  if (score >= 80) return 'near-certain'
+  if (score >= 50) return 'high'
+  if (score >= 30) return 'medium'
+  return 'low'
 }
 
 export interface DismissedDuplicate {
