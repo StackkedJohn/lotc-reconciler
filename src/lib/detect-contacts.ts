@@ -145,25 +145,51 @@ export function detectContactDuplicates(
     }
   }
 
+  // --- Detect spouse pairs ---
+  // Shared email/phone + same last name + distinctly different first names = likely spouse
+  for (const p of pairs.values()) {
+    const hasContactSignal = p.reasons.some(r => r === 'Same email' || r === 'Same phone')
+    const hasLastName = p.reasons.includes('Same last name')
+    const hasNameMatch = p.reasons.includes('Same first name') || p.reasons.includes('Similar first name')
+
+    if (hasContactSignal && hasLastName && !hasNameMatch) {
+      // Both have first names but they're distinctly different — spouse pattern
+      const firstA = p.a.first_name?.trim().toLowerCase()
+      const firstB = p.b.first_name?.trim().toLowerCase()
+      if (firstA && firstB && firstA !== firstB) {
+        p.score = 20  // demote below display threshold by default
+        p.reasons.push('Likely spouse/household')
+        ;(p as PairAccumulator & { tag: string }).tag = 'spouse'
+      }
+    }
+  }
+
   // --- Filter and sort ---
 
   // Drop pairs below threshold (score < 30) and name-only pairs that lack any contact signal
+  // Exception: spouse-tagged pairs are kept at score 20 so users can still see them
   const MIN_SCORE = 30
 
   return Array.from(pairs.values())
     .filter(p => {
+      const tag = (p as PairAccumulator & { tag?: string }).tag
+      if (tag === 'spouse') return true  // always show spouse pairs
       if (p.score < MIN_SCORE) return false
-      // Name-only matches (no email/phone) must have exact first+last to be worth showing
       const hasContactSignal = p.reasons.some(r => r === 'Same email' || r === 'Same phone')
       if (!hasContactSignal && p.score < 35) return false
       return true
     })
-    .map(p => ({
-      recordA: p.a,
-      recordB: p.b,
-      score: Math.min(p.score, 100),
-      tier: scoreTier(Math.min(p.score, 100)),
-      reasons: p.reasons,
-    }))
+    .map(p => {
+      const capped = Math.min(p.score, 100)
+      const tag = (p as PairAccumulator & { tag?: string }).tag as 'spouse' | undefined
+      return {
+        recordA: p.a,
+        recordB: p.b,
+        score: capped,
+        tier: tag === 'spouse' ? 'low' as const : scoreTier(capped),
+        reasons: p.reasons,
+        ...(tag && { tag }),
+      }
+    })
     .sort((a, b) => b.score - a.score) // highest score first
 }

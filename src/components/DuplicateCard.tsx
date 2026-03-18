@@ -20,10 +20,11 @@ interface Props {
   reasons: string[]
   tier: ConfidenceTier
   score: number
+  tag?: 'spouse'
   onClick: () => void
 }
 
-export function DuplicateCard({ nameA, nameB, reasons, tier, score, onClick }: Props) {
+export function DuplicateCard({ nameA, nameB, reasons, tier, score, tag, onClick }: Props) {
   return (
     <button onClick={onClick} className="w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-gray-400 transition-colors">
       <div className="flex items-start justify-between gap-3">
@@ -40,6 +41,9 @@ export function DuplicateCard({ nameA, nameB, reasons, tier, score, onClick }: P
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-1.5">
+          {tag === 'spouse' && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-100 text-blue-700">spouse</span>
+          )}
           <span className="text-xs text-gray-400">{score}</span>
           <span className={`text-xs font-medium px-2 py-0.5 rounded ${tierStyles[tier]}`}>
             {tierLabels[tier]}

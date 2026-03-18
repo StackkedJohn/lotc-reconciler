@@ -8,7 +8,7 @@ import { DuplicateCard } from './DuplicateCard'
 import type { NeonAccount, Child, DuplicatePair, DismissedDuplicate, ConfidenceTier } from '../lib/types'
 
 type Tab = 'contacts' | 'children'
-type Filter = 'all' | ConfidenceTier
+type Filter = 'all' | ConfidenceTier | 'spouse'
 
 interface Props {
   userName: string
@@ -52,10 +52,15 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
   useEffect(() => { scan() }, [scan])
 
   const pairs = tab === 'contacts' ? contactPairs : childPairs
-  const filtered = filter === 'all' ? pairs : pairs.filter(p => p.tier === filter)
+  const filtered = filter === 'all'
+    ? pairs
+    : filter === 'spouse'
+      ? pairs.filter(p => p.tag === 'spouse')
+      : pairs.filter(p => p.tier === filter && p.tag !== 'spouse')
   const nearCertainCount = pairs.filter(p => p.tier === 'near-certain').length
   const highCount = pairs.filter(p => p.tier === 'high').length
   const mediumCount = pairs.filter(p => p.tier === 'medium').length
+  const spouseCount = pairs.filter(p => p.tag === 'spouse').length
   const entityType = tab === 'contacts' ? 'neon_account' as const : 'child' as const
 
   const getName = (record: NeonAccount | Child): string => {
@@ -69,6 +74,7 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
     { value: 'near-certain', label: 'Near certain' },
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
+    ...(spouseCount > 0 ? [{ value: 'spouse' as Filter, label: `Spouse (${spouseCount})` }] : []),
   ]
 
   // Start reviewing from a specific pair, or from the top of filtered list
@@ -101,7 +107,7 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
         </div>
       )}
 
-      <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} loading={loading} />
+      <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} spouse={spouseCount} loading={loading} />
 
       {filtered.length > 0 && (
         <div className="flex items-center gap-2">
@@ -131,6 +137,7 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
             reasons={pair.reasons}
             tier={pair.tier}
             score={pair.score}
+            tag={pair.tag}
             onClick={() => startReviewFrom(index)}
           />
         ))}
