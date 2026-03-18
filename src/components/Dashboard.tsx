@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchAll } from '../lib/fetch-all'
 import { detectContactDuplicates } from '../lib/detect-contacts'
 import { detectChildDuplicates } from '../lib/detect-children'
 import { StatsBar } from './StatsBar'
@@ -28,19 +29,22 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
       const { data: dismissed } = await supabase.from('dismissed_duplicates').select('*')
       const dismissedList = (dismissed ?? []) as unknown as DismissedDuplicate[]
 
-      const { data: accounts } = await supabase
-        .from('neon_accounts')
-        .select('id, neon_id, account_type, first_name, last_name, email, phone, company_name, address_line1, city, state, zip_code, individual_types, source, created_at')
+      // Fetch ALL records (Supabase defaults to 1000 — we have 13k+ contacts)
+      const accounts = await fetchAll<NeonAccount>(
+        'neon_accounts',
+        'id, neon_id, account_type, first_name, last_name, email, phone, company_name, address_line1, city, state, zip_code, individual_types, source, created_at'
+      )
       setContactPairs(detectContactDuplicates(
-        (accounts ?? []) as unknown as NeonAccount[],
+        accounts,
         showDismissed ? [] : dismissedList
       ))
 
-      const { data: children } = await supabase
-        .from('children')
-        .select('id, first_name, last_name, nickname, date_of_birth, age, gender, ethnicity, placement_type, custody_county, grade_fall, caregiver_id, social_worker_id, source, created_at')
+      const children = await fetchAll<Child>(
+        'children',
+        'id, first_name, last_name, nickname, date_of_birth, age, gender, ethnicity, placement_type, custody_county, grade_fall, caregiver_id, social_worker_id, source, created_at'
+      )
       setChildPairs(detectChildDuplicates(
-        (children ?? []) as unknown as Child[],
+        children,
         showDismissed ? [] : dismissedList
       ))
     } finally {
