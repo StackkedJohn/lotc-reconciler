@@ -5,12 +5,15 @@ import { MergeView } from './components/MergeView'
 import { setPassword } from './lib/api'
 import type { NeonAccount, Child, DuplicatePair } from './lib/types'
 
+interface ReviewSession {
+  pairs: DuplicatePair<NeonAccount | Child>[]
+  startIndex: number
+  entityType: 'neon_account' | 'child'
+}
+
 export default function App() {
   const [userName, setUserName] = useState<string | null>(null)
-  const [selectedPair, setSelectedPair] = useState<{
-    pair: DuplicatePair<NeonAccount | Child>
-    entityType: 'neon_account' | 'child'
-  } | null>(null)
+  const [review, setReview] = useState<ReviewSession | null>(null)
 
   useEffect(() => {
     const stored = sessionStorage.getItem('reconciler_auth')
@@ -39,18 +42,20 @@ export default function App() {
         </button>
       </header>
       <main className="max-w-4xl mx-auto p-6">
-        {selectedPair ? (
+        {review ? (
           <MergeView
-            pair={selectedPair.pair}
-            entityType={selectedPair.entityType}
+            pairs={review.pairs}
+            startIndex={review.startIndex}
+            entityType={review.entityType}
             userName={userName}
-            onComplete={() => setSelectedPair(null)}
-            onBack={() => setSelectedPair(null)}
+            onBack={() => setReview(null)}
           />
         ) : (
           <Dashboard
             userName={userName}
-            onSelectPair={(pair, entityType) => setSelectedPair({ pair, entityType })}
+            onStartReview={(pairs, startIndex, entityType) =>
+              setReview({ pairs, startIndex, entityType })
+            }
           />
         )}
       </main>

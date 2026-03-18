@@ -12,10 +12,14 @@ type Filter = 'all' | ConfidenceTier
 
 interface Props {
   userName: string
-  onSelectPair: (pair: DuplicatePair<NeonAccount | Child>, entityType: 'neon_account' | 'child') => void
+  onStartReview: (
+    pairs: DuplicatePair<NeonAccount | Child>[],
+    startIndex: number,
+    entityType: 'neon_account' | 'child'
+  ) => void
 }
 
-export function Dashboard({ userName: _userName, onSelectPair }: Props) {
+export function Dashboard({ userName: _userName, onStartReview }: Props) {
   const [tab, setTab] = useState<Tab>('contacts')
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(false)
@@ -52,6 +56,7 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
   const nearCertainCount = pairs.filter(p => p.tier === 'near-certain').length
   const highCount = pairs.filter(p => p.tier === 'high').length
   const mediumCount = pairs.filter(p => p.tier === 'medium').length
+  const entityType = tab === 'contacts' ? 'neon_account' as const : 'child' as const
 
   const getName = (record: NeonAccount | Child): string => {
     const first = record.first_name || ''
@@ -65,6 +70,11 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
   ]
+
+  // Start reviewing from a specific pair, or from the top of filtered list
+  const startReviewFrom = (index: number) => {
+    onStartReview(filtered as DuplicatePair<NeonAccount | Child>[], index, entityType)
+  }
 
   return (
     <div className="space-y-4">
@@ -93,18 +103,27 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
 
       <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} loading={loading} />
 
-      {pairs.length > 0 && (
-        <div className="flex gap-1">
-          {filters.map(f => (
-            <button key={f.value} onClick={() => setFilter(f.value)} className={`px-3 py-1 rounded text-xs font-medium ${filter === f.value ? 'bg-gray-200 text-gray-900' : 'text-gray-500 hover:bg-gray-100'}`}>
-              {f.label}
-            </button>
-          ))}
+      {filtered.length > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {filters.map(f => (
+              <button key={f.value} onClick={() => setFilter(f.value)} className={`px-3 py-1 rounded text-xs font-medium ${filter === f.value ? 'bg-gray-200 text-gray-900' : 'text-gray-500 hover:bg-gray-100'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1" />
+          <button
+            onClick={() => startReviewFrom(0)}
+            className="px-4 py-1.5 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-800"
+          >
+            Start reviewing ({filtered.length})
+          </button>
         </div>
       )}
 
       <div className="space-y-2">
-        {filtered.map((pair) => (
+        {filtered.map((pair, index) => (
           <DuplicateCard
             key={`${pair.recordA.id}-${pair.recordB.id}`}
             nameA={getName(pair.recordA)}
@@ -112,7 +131,7 @@ export function Dashboard({ userName: _userName, onSelectPair }: Props) {
             reasons={pair.reasons}
             tier={pair.tier}
             score={pair.score}
-            onClick={() => onSelectPair(pair, tab === 'contacts' ? 'neon_account' : 'child')}
+            onClick={() => startReviewFrom(index)}
           />
         ))}
         {!loading && filtered.length === 0 && pairs.length > 0 && (
