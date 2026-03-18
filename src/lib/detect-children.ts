@@ -3,13 +3,19 @@ import type { Child, DuplicatePair, DismissedDuplicate } from './types'
 import { scoreTier } from './types'
 
 /**
- * Child scoring:
- *   Same last name ........... +15
- *   Exact same first name .... +20
- *   Similar first name ....... +10
- *   Same date of birth ....... +40
- *   Close DOB (within 7 days)  +20
- *   Same caregiver ........... +30
+ * Child scoring — signals stack additively:
+ *
+ *   Same last name ................. +15
+ *   Exact same first name .......... +20
+ *   Similar first name ............. +10  (Levenshtein ≤ 2)
+ *   Nickname matches first name .... +15
+ *   Nickname similar to first name . +8   (Levenshtein ≤ 2)
+ *   Same date of birth ............. +40
+ *   Close DOB (within 7 days) ...... +20
+ *   Same caregiver ................. +30
+ *
+ * Indexes: children are grouped by last name, first name, AND DOB.
+ * A pair surfaced by any index gets compared on ALL signals.
  */
 
 interface PairAccumulator {
@@ -18,6 +24,9 @@ interface PairAccumulator {
   score: number
   reasons: string[]
 }
+
+/** Skip groups larger than this to avoid combinatorial explosion */
+const MAX_GROUP = 50
 
 export function detectChildDuplicates(
   children: Child[],
@@ -29,16 +38,31 @@ export function detectChildDuplicates(
   const pairKey = (a: string, b: string) => { const s = [a, b].sort(); return `${s[0]}|${s[1]}` }
   const isDismissed = (idA: string, idB: string) => dismissedSet.has(pairKey(idA, idB))
 
+  // --- Build three indexes ---
   const byLastName = new Map<string, Child[]>()
+  const byFirstName = new Map<string, Child[]>()
+  const byDOB = new Map<string, Child[]>()
+
   for (const child of children) {
     if (child.last_name) {
       const key = child.last_name.trim().toLowerCase()
       if (!byLastName.has(key)) byLastName.set(key, [])
       byLastName.get(key)!.push(child)
     }
+    if (child.first_name) {
+      const key = child.first_name.trim().toLowerCase()
+      if (!byFirstName.has(key)) byFirstName.set(key, [])
+      byFirstName.get(key)!.push(child)
+    }
+    if (child.date_of_birth) {
+      const key = child.date_of_birth
+      if (!byDOB.has(key)) byDOB.set(key, [])
+      byDOB.get(key)!.push(child)
+    }
   }
 
   const pairs = new Map<string, PairAccumulator>()
+  const compared = new Set<string>()  // track pairs we've already fully compared
 
   const addSignal = (a: Child, b: Child, points: number, reason: string) => {
     if (a.id === b.id || isDismissed(a.id, b.id)) return
@@ -62,45 +86,73 @@ export function detectChildDuplicates(
     return Math.abs((new Date(dateA).getTime() - new Date(dateB).getTime()) / (1000 * 60 * 60 * 24))
   }
 
-  for (const group of byLastName.values()) {
-    if (group.length < 2 || group.length > 50) continue
-    for (let i = 0; i < group.length; i++) {
-      for (let j = i + 1; j < group.length; j++) {
-        const a = group[i], b = group[j]
-        if (!a.first_name || !b.first_name) continue
+  /** Compare a pair on ALL signals, regardless of which index surfaced them */
+  const comparePair = (a: Child, b: Child) => {
+    const key = pairKey(a.id, b.id)
+    if (compared.has(key)) return
+    compared.add(key)
 
-        const firstA = a.first_name.toLowerCase()
-        const firstB = b.first_name.toLowerCase()
+    // Last name
+    if (a.last_name && b.last_name &&
+        a.last_name.trim().toLowerCase() === b.last_name.trim().toLowerCase()) {
+      addSignal(a, b, 15, 'Same last name')
+    }
 
-        // Same last name (+15)
-        addSignal(a, b, 15, 'Same last name')
-
-        // Name matching
-        if (firstA === firstB) {
-          addSignal(a, b, 20, 'Same first name')
-        } else {
-          const dist = levenshtein(firstA, firstB)
-          if (dist <= 2) {
-            addSignal(a, b, 10, 'Similar first name')
-          }
-        }
-
-        // DOB matching
-        if (a.date_of_birth && b.date_of_birth) {
-          if (a.date_of_birth === b.date_of_birth) {
-            addSignal(a, b, 40, 'Same date of birth')
-          } else if (daysDiff(a.date_of_birth, b.date_of_birth) <= 7) {
-            addSignal(a, b, 20, 'Close date of birth')
-          }
-        }
-
-        // Same caregiver (+30)
-        if (a.caregiver_id && b.caregiver_id && a.caregiver_id === b.caregiver_id) {
-          addSignal(a, b, 30, 'Same caregiver')
+    // First name
+    if (a.first_name && b.first_name) {
+      const firstA = a.first_name.trim().toLowerCase()
+      const firstB = b.first_name.trim().toLowerCase()
+      if (firstA === firstB) {
+        addSignal(a, b, 20, 'Same first name')
+      } else {
+        const dist = levenshtein(firstA, firstB)
+        if (dist <= 2) {
+          addSignal(a, b, 10, 'Similar first name')
         }
       }
     }
+
+    // Nickname matching — check nickname against the other record's first name
+    if (a.nickname && b.first_name) {
+      const nickA = a.nickname.trim().toLowerCase()
+      const firstB = b.first_name.trim().toLowerCase()
+      if (nickA === firstB) addSignal(a, b, 15, 'Nickname matches first name')
+      else if (levenshtein(nickA, firstB) <= 2) addSignal(a, b, 8, 'Nickname similar to first name')
+    }
+    if (b.nickname && a.first_name) {
+      const nickB = b.nickname.trim().toLowerCase()
+      const firstA = a.first_name.trim().toLowerCase()
+      if (nickB === firstA) addSignal(a, b, 15, 'Nickname matches first name')
+      else if (levenshtein(nickB, firstA) <= 2) addSignal(a, b, 8, 'Nickname similar to first name')
+    }
+
+    // DOB
+    if (a.date_of_birth && b.date_of_birth) {
+      if (a.date_of_birth === b.date_of_birth) {
+        addSignal(a, b, 40, 'Same date of birth')
+      } else if (daysDiff(a.date_of_birth, b.date_of_birth) <= 7) {
+        addSignal(a, b, 20, 'Close date of birth')
+      }
+    }
+
+    // Same caregiver
+    if (a.caregiver_id && b.caregiver_id && a.caregiver_id === b.caregiver_id) {
+      addSignal(a, b, 30, 'Same caregiver')
+    }
   }
+
+  /** Iterate all pairs in a group, capped at MAX_GROUP */
+  const compareGroup = (group: Child[]) => {
+    if (group.length < 2 || group.length > MAX_GROUP) return
+    for (let i = 0; i < group.length; i++)
+      for (let j = i + 1; j < group.length; j++)
+        comparePair(group[i], group[j])
+  }
+
+  // --- Run through all three indexes ---
+  for (const group of byLastName.values()) compareGroup(group)
+  for (const group of byFirstName.values()) compareGroup(group)
+  for (const group of byDOB.values()) compareGroup(group)
 
   const MIN_SCORE = 30
 
