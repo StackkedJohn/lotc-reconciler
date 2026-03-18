@@ -42,7 +42,7 @@ export interface DuplicatePair<T> {
   score: number          // 0-100, higher = more likely duplicate
   tier: ConfidenceTier   // derived from score
   reasons: string[]
-  tag?: 'spouse'         // special classification that overrides tier
+  tag?: 'spouse' | 'sibling'  // special classification that overrides tier
 }
 
 /** Derive tier from numeric score */

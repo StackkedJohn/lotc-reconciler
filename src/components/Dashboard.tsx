@@ -8,7 +8,7 @@ import { DuplicateCard } from './DuplicateCard'
 import type { NeonAccount, Child, DuplicatePair, DismissedDuplicate, ConfidenceTier } from '../lib/types'
 
 type Tab = 'contacts' | 'children'
-type Filter = 'all' | ConfidenceTier | 'spouse'
+type Filter = 'all' | ConfidenceTier | 'spouse' | 'sibling'
 
 interface Props {
   userName: string
@@ -56,11 +56,14 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
     ? pairs
     : filter === 'spouse'
       ? pairs.filter(p => p.tag === 'spouse')
-      : pairs.filter(p => p.tier === filter && p.tag !== 'spouse')
+      : filter === 'sibling'
+        ? pairs.filter(p => p.tag === 'sibling')
+        : pairs.filter(p => p.tier === filter && !p.tag)
   const nearCertainCount = pairs.filter(p => p.tier === 'near-certain').length
   const highCount = pairs.filter(p => p.tier === 'high').length
   const mediumCount = pairs.filter(p => p.tier === 'medium').length
   const spouseCount = pairs.filter(p => p.tag === 'spouse').length
+  const siblingCount = pairs.filter(p => p.tag === 'sibling').length
   const entityType = tab === 'contacts' ? 'neon_account' as const : 'child' as const
 
   const getName = (record: NeonAccount | Child): string => {
@@ -75,6 +78,7 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
     ...(spouseCount > 0 ? [{ value: 'spouse' as Filter, label: `Spouse (${spouseCount})` }] : []),
+    ...(siblingCount > 0 ? [{ value: 'sibling' as Filter, label: `Sibling (${siblingCount})` }] : []),
   ]
 
   // Start reviewing from a specific pair, or from the top of filtered list
@@ -107,7 +111,7 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
         </div>
       )}
 
-      <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} spouse={spouseCount} loading={loading} />
+      <StatsBar total={pairs.length} nearCertain={nearCertainCount} high={highCount} medium={mediumCount} spouse={spouseCount} sibling={siblingCount} loading={loading} />
 
       {filtered.length > 0 && (
         <div className="flex items-center gap-2">

@@ -154,16 +154,46 @@ export function detectChildDuplicates(
   for (const group of byFirstName.values()) compareGroup(group)
   for (const group of byDOB.values()) compareGroup(group)
 
+  // --- Detect sibling pairs ---
+  // Same caregiver + same/close DOB + distinctly different first names = siblings, not duplicates
+  for (const p of pairs.values()) {
+    const hasCaregiver = p.reasons.includes('Same caregiver')
+    const hasDOB = p.reasons.includes('Same date of birth') || p.reasons.includes('Close date of birth')
+    const hasNameMatch = p.reasons.includes('Same first name') || p.reasons.includes('Similar first name')
+      || p.reasons.includes('Nickname matches first name') || p.reasons.includes('Nickname similar to first name')
+
+    if (hasDOB && !hasNameMatch) {
+      const firstA = p.a.first_name?.trim().toLowerCase()
+      const firstB = p.b.first_name?.trim().toLowerCase()
+      // Both have first names but they're distinctly different — likely siblings (esp. twins)
+      if (firstA && firstB && firstA !== firstB && levenshtein(firstA, firstB) > 2) {
+        p.score = hasCaregiver ? 15 : 20  // demote well below threshold
+        p.reasons.push('Likely sibling')
+        ;(p as PairAccumulator & { tag: string }).tag = 'sibling'
+      }
+    }
+  }
+
+  // --- Filter and sort ---
   const MIN_SCORE = 30
 
   return Array.from(pairs.values())
-    .filter(p => p.score >= MIN_SCORE)
-    .map(p => ({
-      recordA: p.a,
-      recordB: p.b,
-      score: Math.min(p.score, 100),
-      tier: scoreTier(Math.min(p.score, 100)),
-      reasons: p.reasons,
-    }))
+    .filter(p => {
+      const tag = (p as PairAccumulator & { tag?: string }).tag
+      if (tag === 'sibling') return true  // always show sibling pairs
+      return p.score >= MIN_SCORE
+    })
+    .map(p => {
+      const capped = Math.min(p.score, 100)
+      const tag = (p as PairAccumulator & { tag?: string }).tag as 'sibling' | undefined
+      return {
+        recordA: p.a,
+        recordB: p.b,
+        score: capped,
+        tier: tag === 'sibling' ? 'low' as const : scoreTier(capped),
+        reasons: p.reasons,
+        ...(tag && { tag }),
+      }
+    })
     .sort((a, b) => b.score - a.score)
 }

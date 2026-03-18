@@ -20,7 +20,7 @@ interface Props {
   reasons: string[]
   tier: ConfidenceTier
   score: number
-  tag?: 'spouse'
+  tag?: 'spouse' | 'sibling'
   onClick: () => void
 }
 
@@ -43,6 +43,9 @@ export function DuplicateCard({ nameA, nameB, reasons, tier, score, tag, onClick
         <div className="shrink-0 flex items-center gap-1.5">
           {tag === 'spouse' && (
             <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-100 text-blue-700">spouse</span>
+          )}
+          {tag === 'sibling' && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700">sibling</span>
           )}
           <span className="text-xs text-gray-400">{score}</span>
           <span className={`text-xs font-medium px-2 py-0.5 rounded ${tierStyles[tier]}`}>
