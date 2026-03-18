@@ -11,7 +11,6 @@ import { scoreTier } from './types'
  *   Nickname matches first name .... +15
  *   Nickname similar to first name . +8   (Levenshtein ≤ 2)
  *   Same date of birth ............. +40
- *   Close DOB (within 7 days) ...... +20
  *   Same caregiver ................. +30
  *
  * Indexes: children are grouped by last name, first name, AND DOB.
@@ -82,10 +81,6 @@ export function detectChildDuplicates(
     }
   }
 
-  const daysDiff = (dateA: string, dateB: string): number => {
-    return Math.abs((new Date(dateA).getTime() - new Date(dateB).getTime()) / (1000 * 60 * 60 * 24))
-  }
-
   /** Compare a pair on ALL signals, regardless of which index surfaced them */
   const comparePair = (a: Child, b: Child) => {
     const key = pairKey(a.id, b.id)
@@ -126,13 +121,9 @@ export function detectChildDuplicates(
       else if (levenshtein(nickB, firstA) <= 2) addSignal(a, b, 8, 'Nickname similar to first name')
     }
 
-    // DOB
-    if (a.date_of_birth && b.date_of_birth) {
-      if (a.date_of_birth === b.date_of_birth) {
-        addSignal(a, b, 40, 'Same date of birth')
-      } else if (daysDiff(a.date_of_birth, b.date_of_birth) <= 7) {
-        addSignal(a, b, 20, 'Close date of birth')
-      }
+    // DOB — exact match only
+    if (a.date_of_birth && b.date_of_birth && a.date_of_birth === b.date_of_birth) {
+      addSignal(a, b, 40, 'Same date of birth')
     }
 
     // Same caregiver
@@ -160,7 +151,7 @@ export function detectChildDuplicates(
   for (const p of pairs.values()) {
     const hasCaregiver = p.reasons.includes('Same caregiver')
     const hasLastName = p.reasons.includes('Same last name')
-    const hasDOB = p.reasons.includes('Same date of birth') || p.reasons.includes('Close date of birth')
+    const hasDOB = p.reasons.includes('Same date of birth')
     const hasNameMatch = p.reasons.includes('Same first name') || p.reasons.includes('Similar first name')
       || p.reasons.includes('Nickname matches first name') || p.reasons.includes('Nickname similar to first name')
 
