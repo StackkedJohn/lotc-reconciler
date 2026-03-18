@@ -1,0 +1,33 @@
+import type { Confidence } from '../lib/types'
+
+interface Props {
+  nameA: string
+  nameB: string
+  reasons: string[]
+  confidence: Confidence
+  onClick: () => void
+}
+
+export function DuplicateCard({ nameA, nameB, reasons, confidence, onClick }: Props) {
+  return (
+    <button onClick={onClick} className="w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-gray-400 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium truncate">{nameA}</span>
+            <span className="text-gray-400">↔</span>
+            <span className="font-medium truncate">{nameB}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {reasons.map(r => (
+              <span key={r} className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{r}</span>
+            ))}
+          </div>
+        </div>
+        <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded ${confidence === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+          {confidence}
+        </span>
+      </div>
+    </button>
+  )
+}
