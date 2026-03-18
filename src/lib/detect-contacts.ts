@@ -100,9 +100,9 @@ export function detectContactDuplicates(
         addPair(group[i], group[j], 'high', 'Same phone')
   }
 
-  // Rule 3: Fuzzy first name + exact last name
+  // Rule 3: Fuzzy first name + exact last name (skip large groups — common surnames)
   for (const group of byLastName.values()) {
-    if (group.length < 2) continue
+    if (group.length < 2 || group.length > 50) continue
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i], b = group[j]
@@ -113,15 +113,22 @@ export function detectContactDuplicates(
     }
   }
 
-  // Rule 4: Same name + same zip
+  // Rule 4: Exact same full name — only flag if they also share a zip or phone area code
+  // This catches "Katie Myers" appearing 216 times as a real person with multiple records
+  // but NOT "John Smith" in the same zip who are unrelated people
   for (const group of byLastName.values()) {
-    if (group.length < 2) continue
+    if (group.length < 2 || group.length > 50) continue
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i], b = group[j]
-        if (!a.first_name || !b.first_name || !a.zip_code || !b.zip_code) continue
-        if (a.first_name.toLowerCase() === b.first_name.toLowerCase() && a.zip_code === b.zip_code)
-          addPair(a, b, 'medium', 'Same name and zip code')
+        if (!a.first_name || !b.first_name) continue
+        if (a.first_name.toLowerCase() !== b.first_name.toLowerCase()) continue
+        // Exact name match — require an additional signal: same zip AND same phone area code or same email domain
+        const sameZip = a.zip_code && b.zip_code && a.zip_code === b.zip_code
+        const sameEmailDomain = a.email && b.email &&
+          a.email.split('@')[1]?.toLowerCase() === b.email.split('@')[1]?.toLowerCase()
+        if (sameZip && sameEmailDomain)
+          addPair(a, b, 'medium', 'Same name, zip, and email domain')
       }
     }
   }
