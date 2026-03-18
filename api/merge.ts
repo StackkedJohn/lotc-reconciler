@@ -56,6 +56,10 @@ export default async function handler(req: Request) {
       return Response.json({ success: true })
     }
 
+    if (action === 'validate') {
+      return Response.json({ success: true })
+    }
+
     return Response.json({ error: 'Unknown action' }, { status: 400 })
   } catch (err: any) {
     return Response.json({ error: err.message || 'Internal error' }, { status: 500 })
