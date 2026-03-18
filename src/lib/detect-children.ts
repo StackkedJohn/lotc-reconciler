@@ -155,14 +155,16 @@ export function detectChildDuplicates(
   for (const group of byDOB.values()) compareGroup(group)
 
   // --- Detect sibling pairs ---
-  // Same caregiver + same/close DOB + distinctly different first names = siblings, not duplicates
+  // Same household (caregiver OR last name) + same/close DOB + distinctly different first names = siblings
+  // DOB-only matches with different names are NOT siblings — could be same child after placement/name change
   for (const p of pairs.values()) {
     const hasCaregiver = p.reasons.includes('Same caregiver')
+    const hasLastName = p.reasons.includes('Same last name')
     const hasDOB = p.reasons.includes('Same date of birth') || p.reasons.includes('Close date of birth')
     const hasNameMatch = p.reasons.includes('Same first name') || p.reasons.includes('Similar first name')
       || p.reasons.includes('Nickname matches first name') || p.reasons.includes('Nickname similar to first name')
 
-    if (hasDOB && !hasNameMatch) {
+    if (hasDOB && !hasNameMatch && (hasCaregiver || hasLastName)) {
       const firstA = p.a.first_name?.trim().toLowerCase()
       const firstB = p.b.first_name?.trim().toLowerCase()
       // Both have first names but they're distinctly different — likely siblings (esp. twins)
