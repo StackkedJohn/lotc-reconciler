@@ -2,10 +2,46 @@ import { normalizeToE164 } from './normalize-phone'
 import { levenshtein } from './levenshtein'
 import type { NeonAccount, DuplicatePair, DismissedDuplicate, Confidence } from './types'
 
+/** Skip phone groups larger than this — they're org numbers or placeholders, not real duplicates */
+const MAX_PHONE_GROUP = 10
+
+/** Records must have at least a first OR last name to be considered for matching */
+function hasName(acc: NeonAccount): boolean {
+  return !!(acc.first_name?.trim() || acc.last_name?.trim())
+}
+
+/** For email matches: require the pair to look like the same person, not just shared email */
+function emailPairLooksLikeDuplicate(a: NeonAccount, b: NeonAccount): boolean {
+  const lastA = a.last_name?.trim().toLowerCase()
+  const lastB = b.last_name?.trim().toLowerCase()
+  const firstA = a.first_name?.trim().toLowerCase()
+  const firstB = b.first_name?.trim().toLowerCase()
+
+  // Same last name → likely duplicate
+  if (lastA && lastB && lastA === lastB) return true
+
+  // Same first name → likely duplicate (e.g. two "Doug" records)
+  if (firstA && firstB && firstA === firstB) return true
+
+  // Fuzzy first name match with same last name
+  if (firstA && firstB && lastA && lastB && lastA === lastB) {
+    if (levenshtein(firstA, firstB) <= 2) return true
+  }
+
+  // One or both have no name — can't tell, so include it (user decides)
+  if (!hasName(a) || !hasName(b)) return true
+
+  // Different names entirely → probably a shared email (family/org), not a duplicate
+  return false
+}
+
 export function detectContactDuplicates(
   accounts: NeonAccount[],
   dismissed: DismissedDuplicate[]
 ): DuplicatePair<NeonAccount>[] {
+  // Filter out records with no name at all — they're not useful to merge
+  const named = accounts.filter(hasName)
+
   const dismissedSet = new Set(
     dismissed.filter(d => d.entity_type === 'neon_account').map(d => `${d.record_a_id}|${d.record_b_id}`)
   )
@@ -16,7 +52,7 @@ export function detectContactDuplicates(
   const byPhone = new Map<string, NeonAccount[]>()
   const byLastName = new Map<string, NeonAccount[]>()
 
-  for (const acc of accounts) {
+  for (const acc of named) {
     if (acc.email) {
       const key = acc.email.trim().toLowerCase()
       if (!byEmail.has(key)) byEmail.set(key, [])
@@ -47,17 +83,18 @@ export function detectContactDuplicates(
     }
   }
 
-  // Rule 1: Exact email
+  // Rule 1: Exact email — but only if the pair looks like the same person
   for (const group of byEmail.values()) {
     if (group.length < 2) continue
     for (let i = 0; i < group.length; i++)
       for (let j = i + 1; j < group.length; j++)
-        addPair(group[i], group[j], 'high', 'Same email')
+        if (emailPairLooksLikeDuplicate(group[i], group[j]))
+          addPair(group[i], group[j], 'high', 'Same email')
   }
 
-  // Rule 2: Exact phone
-  for (const group of byPhone.values()) {
-    if (group.length < 2) continue
+  // Rule 2: Exact phone — skip large groups (org numbers, placeholders)
+  for (const [, group] of byPhone) {
+    if (group.length < 2 || group.length > MAX_PHONE_GROUP) continue
     for (let i = 0; i < group.length; i++)
       for (let j = i + 1; j < group.length; j++)
         addPair(group[i], group[j], 'high', 'Same phone')
