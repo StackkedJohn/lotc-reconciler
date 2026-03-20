@@ -8,7 +8,37 @@ import { DuplicateCard } from './DuplicateCard'
 import type { NeonAccount, Child, DuplicatePair, DismissedDuplicate, ConfidenceTier } from '../lib/types'
 
 type Tab = 'contacts' | 'children'
+type ContactCategory = 'all' | 'caregiver' | 'donor' | 'social-worker' | 'christmas-sponsor' | 'volunteer' | 'other' | 'uncategorized'
 type Filter = 'all' | ConfidenceTier | 'spouse' | 'sibling'
+
+const CONTACT_CATEGORIES: { value: ContactCategory; label: string; match: string[] }[] = [
+  { value: 'all', label: 'All', match: [] },
+  { value: 'caregiver', label: 'Caregivers', match: ['Caregiver'] },
+  { value: 'donor', label: 'Donors', match: ['Donor'] },
+  { value: 'social-worker', label: 'Social Workers', match: ['Social Worker'] },
+  { value: 'christmas-sponsor', label: 'Christmas Sponsors', match: ['Christmas Sponsor'] },
+  { value: 'volunteer', label: 'Volunteers', match: ['Volunteer'] },
+  { value: 'other', label: 'Other', match: ['Other', 'Group Home', 'GAL (Guardian ad litem)'] },
+  { value: 'uncategorized', label: 'Uncategorized', match: [] },
+]
+
+/** Flatten individual_types array, splitting comma-separated entries */
+function getRecordTypes(record: NeonAccount): string[] {
+  if (!record.individual_types || record.individual_types.length === 0) return []
+  return record.individual_types.flatMap(t => t.split(',').map(s => s.trim())).filter(Boolean)
+}
+
+/** Check if a contact pair matches a category (either record matches) */
+function pairMatchesCategory(pair: DuplicatePair<NeonAccount>, category: ContactCategory): boolean {
+  if (category === 'all') return true
+  const typesA = getRecordTypes(pair.recordA)
+  const typesB = getRecordTypes(pair.recordB)
+  if (category === 'uncategorized') {
+    return typesA.length === 0 || typesB.length === 0
+  }
+  const matchTerms = CONTACT_CATEGORIES.find(c => c.value === category)!.match
+  return matchTerms.some(m => typesA.includes(m) || typesB.includes(m))
+}
 
 interface Props {
   userName: string
@@ -21,6 +51,7 @@ interface Props {
 
 export function Dashboard({ userName: _userName, onStartReview }: Props) {
   const [tab, setTab] = useState<Tab>('contacts')
+  const [category, setCategory] = useState<ContactCategory>('all')
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(false)
   const [contactPairs, setContactPairs] = useState<DuplicatePair<NeonAccount>[]>([])
@@ -51,7 +82,10 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
 
   useEffect(() => { scan() }, [scan])
 
-  const pairs = tab === 'contacts' ? contactPairs : childPairs
+  const basePairs = tab === 'contacts' ? contactPairs : childPairs
+  const pairs = tab === 'contacts' && category !== 'all'
+    ? (basePairs as DuplicatePair<NeonAccount>[]).filter(p => pairMatchesCategory(p, category)) as typeof basePairs
+    : basePairs
   const filtered = filter === 'all'
     ? pairs
     : filter === 'spouse'
@@ -89,10 +123,10 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <button onClick={() => setTab('contacts')} className={`px-4 py-1.5 rounded text-sm font-medium ${tab === 'contacts' ? 'bg-gray-900 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}>
+        <button onClick={() => { setTab('contacts'); setFilter('all') }} className={`px-4 py-1.5 rounded text-sm font-medium ${tab === 'contacts' ? 'bg-gray-900 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}>
           Contacts ({contactPairs.length})
         </button>
-        <button onClick={() => setTab('children')} className={`px-4 py-1.5 rounded text-sm font-medium ${tab === 'children' ? 'bg-gray-900 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}>
+        <button onClick={() => { setTab('children'); setCategory('all'); setFilter('all') }} className={`px-4 py-1.5 rounded text-sm font-medium ${tab === 'children' ? 'bg-gray-900 text-white' : 'bg-white border text-gray-700 hover:bg-gray-50'}`}>
           Children ({childPairs.length})
         </button>
         <div className="flex-1" />
@@ -104,6 +138,30 @@ export function Dashboard({ userName: _userName, onStartReview }: Props) {
           {loading ? 'Scanning...' : 'Scan'}
         </button>
       </div>
+
+      {tab === 'contacts' && (
+        <div className="flex gap-1 flex-wrap">
+          {CONTACT_CATEGORIES.map(c => {
+            const count = c.value === 'all'
+              ? contactPairs.length
+              : contactPairs.filter(p => pairMatchesCategory(p, c.value)).length
+            if (count === 0 && c.value !== 'all') return null
+            return (
+              <button
+                key={c.value}
+                onClick={() => { setCategory(c.value); setFilter('all') }}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  category === c.value
+                    ? 'bg-gray-800 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {c.label} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {tab === 'children' && contactPairs.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700">
